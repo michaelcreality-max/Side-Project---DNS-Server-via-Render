@@ -1,21 +1,26 @@
 const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 const dns = require('dns');
 const axios = require('axios');
 const cors = require('cors');
-const https = require('https');
-const http = require('http');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
 
-// CRUCIAL MULTI-PARSER FIX: This allows the server to parse regular form data AND JSON text smoothly
-app.use(express.json());
-app.use(express.urlencoded({ extended: true })); 
+// A simple landing page text if someone visits via browser
+app.get('/', (req, res) => {
+    res.send('DNS Proxy WebSocket Engine is running.');
+});
 
+const server = http.createServer(app);
+
+// Initialize a standard WebSocket server on top of our HTTP layer
+const wss = new WebSocket.Server({ server });
+
+// Custom DNS Resolver Configuration
 const customResolver = new dns.Resolver();
-customResolver.setServers(['8.8.8.8']); // Google Public DNS testing pipeline 
+customResolver.setServers(['8.8.8.8']); // Google Public DNS for lookup verification
 
 const customLookup = (hostname, options, callback) => {
     customResolver.resolve4(hostname, (err, addresses) => {
@@ -26,49 +31,46 @@ const customLookup = (hostname, options, callback) => {
     });
 };
 
-const customHttpsAgent = new https.Agent({ lookup: customLookup });
+const customHttpsAgent = new (require('https').Agent)({ lookup: customLookup });
 const customHttpAgent = new http.Agent({ lookup: customLookup });
 
-app.get('/', (req, res) => {
-    res.send('Proxy server is online and listening for form streams!');
-});
+// Handle active client socket streams
+wss.on('connection', (ws) => {
+    console.log('Wix frontend connected via secure WebSocket channel.');
 
-app.post('/proxy/', async (req, res) => {
-    // Read the parameter from either a JSON body or a standard form stream body
-    const targetUrl = req.body.url;
-    
-    if (!targetUrl) {
-        return res.status(400).send('Proxy Error: Missing "url" property in request body.');
-    }
+    ws.on('message', async (message) => {
+        try {
+            // Unpack the data coming from Wix
+            const data = JSON.parse(message);
+            const targetUrl = data.url;
 
-    try {
-        let cleanUrl = targetUrl.trim();
-        if (!/^https?:\/\//i.test(cleanUrl)) {
-            cleanUrl = 'https://' + cleanUrl;
+            if (!targetUrl) {
+                return ws.send(JSON.stringify({ error: 'Missing target URL parameter.' }));
+            }
+
+            let cleanUrl = targetUrl.trim();
+            if (!/^https?:\/\//i.test(cleanUrl)) {
+                cleanUrl = 'https://' + cleanUrl;
+            }
+
+            // Fetch the site using the forced custom DNS lookups
+            const response = await axios.get(cleanUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+                httpsAgent: customHttpsAgent,
+                httpAgent: customHttpAgent,
+                timeout: 10000
+            });
+
+            // Send the raw HTML back through the open WebSocket tunnel
+            ws.send(JSON.stringify({ html: response.data }));
+
+        } catch (error) {
+            ws.send(JSON.stringify({ error: `Proxy Error: ${error.message}` }));
         }
-
-        const response = await axios.get(cleanUrl, {
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
-            },
-            httpsAgent: customHttpsAgent,
-            httpAgent: customHttpAgent,
-            timeout: 10000 
-        });
-
-        // Strip constraints so Wix can embed the content
-        res.removeHeader('X-Frame-Options');
-        res.removeHeader('Content-Security-Policy');
-        res.setHeader('X-Frame-Options', 'ALLOWALL'); 
-        res.setHeader('Content-Security-Policy', "frame-ancestors *");
-        
-        res.send(response.data);
-
-    } catch (error) {
-        res.status(500).send(`Proxy Error: Could not resolve "${targetUrl}". Details: ${error.message}`);
-    }
+    });
 });
 
-app.listen(PORT, () => {
-    console.log(`Proxy active on port ${PORT}`);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
 });
