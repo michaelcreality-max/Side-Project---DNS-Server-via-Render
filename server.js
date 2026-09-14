@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 
 const customResolver = new dns.Resolver();
-customResolver.setServers(['8.8.8.8']); // Using public fallback verification 
+customResolver.setServers(['8.8.8.8']); // Google Public fallback for architecture testing
 
 const customLookup = (hostname, options, callback) => {
     customResolver.resolve4(hostname, (err, addresses) => {
@@ -26,18 +26,18 @@ const customHttpsAgent = new https.Agent({ lookup: customLookup });
 const customHttpAgent = new http.Agent({ lookup: customLookup });
 
 app.get('/', (req, res) => {
-    res.send('Proxy server is online and forcing public DNS lookups!');
+    res.send('Proxy server is online and forcing custom DNS lookups!');
 });
 
-// UPDATED ENDPOINT PATH LOGIC: Captures trailing paths instead of query parameters
-app.get('/proxy/*', async (req, res) => {
-    // Extracts whatever text follows "/proxy/"
-    const targetUrl = req.params[0];
+// FIX: Express 5 requires a named parameter prefix (*target) to store the data as a clean variable
+app.get('/proxy/*target', async (req, res) => {
+    // Correctly pull the trailing text matching our named wildcard parameter
+    const urlString = req.params.target;
     
-    if (!targetUrl) return res.status(400).send('Missing target URL path.');
+    if (!urlString) return res.status(400).send('Missing target URL path parameter.');
 
     try {
-        let cleanUrl = targetUrl.trim();
+        let cleanUrl = decodeURIComponent(urlString).trim();
         if (!/^https?:\/\//i.test(cleanUrl)) {
             cleanUrl = 'https://' + cleanUrl;
         }
@@ -59,7 +59,7 @@ app.get('/proxy/*', async (req, res) => {
         res.send(response.data);
 
     } catch (error) {
-        console.error("DNS Error:", error.message);
+        console.error("Proxy Endpoint Error:", error.message);
         res.status(500).send(`Proxy Routing Error: Could not resolve target path layout.`);
     }
 });
