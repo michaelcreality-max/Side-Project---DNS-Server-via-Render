@@ -10,24 +10,18 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 
-// Create an isolated DNS resolver instance
 const customResolver = new dns.Resolver();
-
-// Force it to use Google's Public DNS for testing. 
-// (Later, you can put your custom DNS IP here!)
 customResolver.setServers(['8.8.8.8']); 
 
-// Intercept Node.js lookups and pass them through our resolver
 const customLookup = (hostname, options, callback) => {
     customResolver.resolve4(hostname, (err, addresses) => {
         if (err || !addresses || !addresses[0]) {
             return callback(new Error(`DNS lookup failed for ${hostname}`), null, 4);
         }
-        callback(null, addresses[0], 4);
+        callback(null, addresses, 4);
     });
 };
 
-// Bind our custom resolver directly to the connection agents
 const customHttpsAgent = new https.Agent({ lookup: customLookup });
 const customHttpAgent = new http.Agent({ lookup: customLookup });
 
@@ -45,7 +39,6 @@ app.get('/proxy', async (req, res) => {
             cleanUrl = 'https://' + cleanUrl;
         }
 
-        // Force Axios to fetch using our custom network agents
         const response = await axios.get(cleanUrl, {
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
@@ -55,9 +48,10 @@ app.get('/proxy', async (req, res) => {
             timeout: 10000 
         });
 
-        // Strip web security headers so it displays smoothly inside the Wix canvas
         res.removeHeader('X-Frame-Options');
         res.removeHeader('Content-Security-Policy');
+        res.setHeader('X-Frame-Options', 'ALLOWALL'); 
+        res.setHeader('Content-Security-Policy', "frame-ancestors *");
         
         res.send(response.data);
 
