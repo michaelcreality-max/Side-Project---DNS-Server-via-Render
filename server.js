@@ -9,13 +9,20 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json()); // Crucial: Allows the server to parse JSON bodies
+app.use(express.json());
 
+// Set up the custom isolated DNS resolver
 const customResolver = new dns.Resolver();
-customResolver.setServers(['8.8.8.8']); // Google Public DNS verification fallback
+customResolver.setServers(['8.8.8.8']); // Using 8.8.8.8 for standard testing
 
 const customLookup = (hostname, options, callback) => {
+    // Set a strict 4-second timeout limit for custom DNS resolution
+    const timeout = setTimeout(() => {
+        callback(new Error(`DNS resolution timed out for ${hostname}`), null, 4);
+    }, 4000);
+
     customResolver.resolve4(hostname, (err, addresses) => {
+        clearTimeout(timeout);
         if (err || !addresses || !addresses.length) {
             return callback(new Error(`DNS lookup failed for ${hostname}`), null, 4);
         }
@@ -26,12 +33,12 @@ const customLookup = (hostname, options, callback) => {
 const customHttpsAgent = new https.Agent({ lookup: customLookup });
 const customHttpAgent = new http.Agent({ lookup: customLookup });
 
-// Keep the GET root open so Render stays awake
+// Keep the GET root open to easily check if the server is awake
 app.get('/', (req, res) => {
-    res.send('Proxy server is online and forcing custom DNS lookups via POST requests!');
+    res.send('Proxy server is active and running perfectly!');
 });
 
-// Ensure this line accepts the trailing slash matching our updated Wix call
+// Robust POST handler with built-in fallbacks
 app.post('/proxy/', async (req, res) => {
     const targetUrl = req.body.url;
     
@@ -39,34 +46,48 @@ app.post('/proxy/', async (req, res) => {
         return res.status(400).send('Proxy Error: Missing "url" property in JSON body.');
     }
 
-    try {
-        let cleanUrl = targetUrl.trim();
-        if (!/^https?:\/\//i.test(cleanUrl)) {
-            cleanUrl = 'https://' + cleanUrl;
-        }
+    let cleanUrl = targetUrl.trim();
+    if (!/^https?:\/\//i.test(cleanUrl)) {
+        cleanUrl = 'https://' + cleanUrl;
+    }
 
+    // --- TRY ROUTE 1: Custom DNS Routing ---
+    try {
         const response = await axios.get(cleanUrl, {
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
-            },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             httpsAgent: customHttpsAgent,
             httpAgent: customHttpAgent,
-            timeout: 10000 
+            timeout: 6000 
         });
 
-        // Strip web security layout frame blocks 
         res.removeHeader('X-Frame-Options');
         res.removeHeader('Content-Security-Policy');
         res.setHeader('X-Frame-Options', 'ALLOWALL'); 
         res.setHeader('Content-Security-Policy', "frame-ancestors *");
-        
-        res.send(response.data);
+        return res.send(response.data);
 
-    } catch (error) {
-        res.status(500).send(`Proxy Error: Could not resolve "${targetUrl}". Details: ${error.message}`);
+    } catch (dnsError) {
+        console.warn(`[DNS Warning] Custom lookup failed for ${cleanUrl}. Dropping back to standard resolution...`);
+        
+        // --- FALLBACK ROUTE 2: Standard Network Fetch (Prevents Server Crash/503) ---
+        try {
+            const fallbackResponse = await axios.get(cleanUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                timeout: 6000 // Standard fallback lookup
+            });
+
+            res.removeHeader('X-Frame-Options');
+            res.removeHeader('Content-Security-Policy');
+            res.setHeader('X-Frame-Options', 'ALLOWALL'); 
+            res.setHeader('Content-Security-Policy', "frame-ancestors *");
+            return res.send(fallbackResponse.data);
+
+        } catch (fallbackError) {
+            return res.status(500).send(`Browser Pipeline Error: Both custom DNS and fallback networks failed to resolve "${targetUrl}".`);
+        }
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Proxy active on port ${PORT}`);
+    console.log(`Proxy listening safely on port ${PORT}`);
 });
