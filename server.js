@@ -10,12 +10,9 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 
-// Create an isolated DNS resolver instance
 const customResolver = new dns.Resolver();
-// Hardcoded to Google's public resolver for baseline connection testing
-customResolver.setServers(['8.8.8.8']); 
+customResolver.setServers(['8.8.8.8']); // Google Public DNS for lookup testing
 
-// Route lookups strictly through our custom DNS resolver instance
 const customLookup = (hostname, options, callback) => {
     customResolver.resolve4(hostname, (err, addresses) => {
         if (err || !addresses || !addresses.length) {
@@ -28,17 +25,14 @@ const customLookup = (hostname, options, callback) => {
 const customHttpsAgent = new https.Agent({ lookup: customLookup });
 const customHttpAgent = new http.Agent({ lookup: customLookup });
 
-// Root route 
-app.get('/', (req, res) => {
-    res.send('Proxy server is online and forcing custom DNS lookups!');
-});
-
-// Explicit Proxy Route
-app.get('/proxy', async (req, res) => {
-    const targetUrl = req.query.url;
+// Root route handles everything now to avoid route loops
+app.get('/', async (req, res) => {
+    // Read the target website out of our custom hidden header
+    const targetUrl = req.headers['x-target-url'];
     
+    // If no header is passed, show a standard welcome text
     if (!targetUrl) {
-        return res.status(400).send('Proxy Error: Missing "url" parameter.');
+        return res.send('Proxy server is online and listening for X-Target-Url headers!');
     }
 
     try {
@@ -47,7 +41,6 @@ app.get('/proxy', async (req, res) => {
             cleanUrl = 'https://' + cleanUrl;
         }
 
-        // Fetch using the custom DNS resolver agents
         const response = await axios.get(cleanUrl, {
             headers: { 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
@@ -57,7 +50,7 @@ app.get('/proxy', async (req, res) => {
             timeout: 10000 
         });
 
-        // Clear layout iframe blocking rules
+        // Strip web security frame blocks so Wix can display the result
         res.removeHeader('X-Frame-Options');
         res.removeHeader('Content-Security-Policy');
         res.setHeader('X-Frame-Options', 'ALLOWALL'); 
@@ -66,11 +59,10 @@ app.get('/proxy', async (req, res) => {
         res.send(response.data);
 
     } catch (error) {
-        console.error("Internal Proxy Error Logged:", error.message);
-        res.status(500).send(`Proxy Error: Could not resolve or parse "${targetUrl}". Details: ${error.message}`);
+        res.status(500).send(`Proxy Error: Could not resolve "${targetUrl}". Details: ${error.message}`);
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Proxy server listening on port ${PORT}`);
+    console.log(`Proxy active on port ${PORT}`);
 });
