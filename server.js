@@ -6,24 +6,18 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS so your Wix site can talk to this server
 app.use(cors());
 
-// Force Node.js to use Google's public DNS server
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+// Force Node.js to use your custom DNS server
+dns.setServers(['8.8.8.8']); // Put your custom DNS IP here
 
-// Health check route
 app.get('/', (req, res) => {
-    res.send('Proxy server is online and running on custom DNS!');
+    res.send('Proxy server is online!');
 });
 
-// Proxy logic
 app.get('/proxy', async (req, res) => {
     const targetUrl = req.query.url;
-
-    if (!targetUrl) {
-        return res.status(400).send('Error: Missing "url" parameter.');
-    }
+    if (!targetUrl) return res.status(400).send('Missing url.');
 
     try {
         let cleanUrl = targetUrl;
@@ -38,6 +32,11 @@ app.get('/proxy', async (req, res) => {
             timeout: 10000 
         });
 
+        // REMOVE THE FRAMING RESTRICTIONS:
+        // We strip headers that prevent embedding, allowing sites like Google/Example to show inside Wix
+        res.removeHeader('X-Frame-Options');
+        res.removeHeader('Content-Security-Policy');
+        
         res.send(response.data);
 
     } catch (error) {
