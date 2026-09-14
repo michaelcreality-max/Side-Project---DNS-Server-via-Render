@@ -31,8 +31,8 @@ app.get('/', (req, res) => {
     res.send('Proxy server is online and forcing custom DNS lookups via POST requests!');
 });
 
-// CHANGED TO POST: Listens for structural content changes sent through data payloads
-app.post('/proxy', async (req, res) => {
+// Ensure this line accepts the trailing slash matching our updated Wix call
+app.post('/proxy/', async (req, res) => {
     const targetUrl = req.body.url;
     
     if (!targetUrl) {
