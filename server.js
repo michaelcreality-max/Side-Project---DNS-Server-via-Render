@@ -9,8 +9,8 @@ const PORT = process.env.PORT || 3000;
 // Enable CORS so your Wix site can talk to this server
 app.use(cors());
 
-// Force Node.js to use your custom DNS server
-dns.setServers(['YOUR_CUSTOM_DNS_SERVER_IP']);
+// Force Node.js to use Google's public DNS server
+dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 // Health check route
 app.get('/', (req, res) => {
