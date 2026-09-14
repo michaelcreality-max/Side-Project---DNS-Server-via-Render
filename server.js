@@ -9,9 +9,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
+app.use(express.json()); // Crucial: Allows the server to parse JSON bodies
 
 const customResolver = new dns.Resolver();
-customResolver.setServers(['8.8.8.8']); // Google Public DNS for lookup testing
+customResolver.setServers(['8.8.8.8']); // Google Public DNS verification fallback
 
 const customLookup = (hostname, options, callback) => {
     customResolver.resolve4(hostname, (err, addresses) => {
@@ -25,14 +26,17 @@ const customLookup = (hostname, options, callback) => {
 const customHttpsAgent = new https.Agent({ lookup: customLookup });
 const customHttpAgent = new http.Agent({ lookup: customLookup });
 
-// Root route handles everything now to avoid route loops
-app.get('/', async (req, res) => {
-    // Read the target website out of our custom hidden header
-    const targetUrl = req.headers['x-target-url'];
+// Keep the GET root open so Render stays awake
+app.get('/', (req, res) => {
+    res.send('Proxy server is online and forcing custom DNS lookups via POST requests!');
+});
+
+// CHANGED TO POST: Listens for structural content changes sent through data payloads
+app.post('/proxy', async (req, res) => {
+    const targetUrl = req.body.url;
     
-    // If no header is passed, show a standard welcome text
     if (!targetUrl) {
-        return res.send('Proxy server is online and listening for X-Target-Url headers!');
+        return res.status(400).send('Proxy Error: Missing "url" property in JSON body.');
     }
 
     try {
@@ -50,7 +54,7 @@ app.get('/', async (req, res) => {
             timeout: 10000 
         });
 
-        // Strip web security frame blocks so Wix can display the result
+        // Strip web security layout frame blocks 
         res.removeHeader('X-Frame-Options');
         res.removeHeader('Content-Security-Policy');
         res.setHeader('X-Frame-Options', 'ALLOWALL'); 
